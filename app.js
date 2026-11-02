@@ -113,9 +113,20 @@ function initAudio(){
  });ready.catch(()=>hint.textContent='음원을 재생할 수 없습니다. 새로고침해 주세요.');}
  ctx.resume();return ready;
 }
+let catCount=0;
+function addCatMark(){
+ const container=document.querySelector('#cat-marks');
+ catCount++;
+ const mark=document.createElement('span');mark.className=catCount%5===0?'cat-mark gold':'cat-mark';
+ mark.innerHTML='<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.3 14.1 5.7 6l6.1 3.1a15 15 0 0 1 8.4 0L26.3 6l.4 8.1c1 1.8 1.1 4 .4 5.9-1.3 3.6-5.2 5.7-11.1 5.7S6.2 23.6 4.9 20c-.7-1.9-.6-4.1.4-5.9Z"/><path d="M11.2 16.1h.1m9.4 0h.1M14.2 19.1l1.8 1.2 1.8-1.2M16 20.3v1.2m-7.7-2.1-2.8-.5m17.9.5 2.8-.5"/></svg>';
+ container.appendChild(mark);
+ // Keep the visible trail bounded to the available viewport.
+ const capacity=Math.max(1,Math.floor(container.clientWidth/62)*Math.floor(container.clientHeight/62));
+ while(container.children.length>capacity)container.firstElementChild.remove();
+}
 function strike(speed,profile=null){
  if(!buffer)return;
- if(physical){physicalStrike(speed,profile);return;}
+ if(physical){addCatMark();physicalStrike(speed,profile);return;}
  const {peak}=strikeResponse(speed);
  // Strong automatic strike preserves the recording; manual hits only scale gain.
  const level=profile?profile.gain:Math.min(1,peak/.3398);
@@ -125,13 +136,39 @@ function strike(speed,profile=null){
  src.connect(g);g.connect(master);
  // Preserve the recording's natural decay at every strength.
  // The playback file already has its inaudible tail removed and a short end fade.
- src.start();
+ src.start();addCatMark();
  const voice={src,g};active.add(voice);
  src.onended=()=>{active.delete(voice);src.disconnect();g.disconnect();queueAutoplay();};
 }
 
 const ray=new THREE.Raycaster(),pointer=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-1.08);
 function point(e){const rect=root.getBoundingClientRect();pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera);const p=new THREE.Vector3();return ray.ray.intersectPlane(plane,p)}
+let bowlTap=null;
+root.addEventListener('pointerdown',e=>{
+ if(e.button!==0||!e.isPrimary){bowlTap=null;return;}
+ point(e);
+ bowlTap=ray.intersectObject(bowl,false).length?{id:e.pointerId,x:e.clientX,y:e.clientY,time:performance.now(),moved:false}:null;
+},true);
+root.addEventListener('pointermove',e=>{
+ if(bowlTap&&e.pointerId===bowlTap.id&&Math.hypot(e.clientX-bowlTap.x,e.clientY-bowlTap.y)>8)bowlTap.moved=true;
+},true);
+root.addEventListener('pointercancel',()=>bowlTap=null,true);
+root.addEventListener('pointerup',async e=>{
+ const tap=bowlTap;bowlTap=null;
+ if(!tap||tap.id!==e.pointerId||tap.moved||performance.now()-tap.time>450)return;
+ point(e);if(!ray.intersectObject(bowl,false).length)return;
+ const ticket=requestId;
+ try{
+  const readyAudio=initAudio();await readyAudio;
+  if(ticket!==requestId)return;
+  clearTimeout(repeatTimer);repeatTimer=null;
+  const profile=automaticProfile(Number(document.querySelector('#strength-slider').value)+2);
+  strike(profile.speed,profile);energy=impactEnergy(energy,profile.speed);recoil=.005+.02*profile.gain;
+  const direction=new THREE.Vector2(mallet.position.x,mallet.position.z).normalize();
+  // Sound fires on touch; the shared animation must not fire it a second time.
+  autoHit={start:performance.now()-.22*1000,direction,struck:true,from:Math.hypot(mallet.position.x,mallet.position.z),profile};
+ }catch(error){hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';}
+},true);
 root.addEventListener('pointerdown',e=>{
  if(drag||viewDrag||autoHit||e.button!==0)return;
  point(e); // Update the picking ray from the pointer position.
@@ -141,7 +178,7 @@ root.addEventListener('pointerdown',e=>{
  else{viewDrag=true;viewPointer=e.pointerId;viewX=e.clientX;viewY=e.clientY;}
 });
 root.addEventListener('pointermove',e=>{
- if(viewDrag){if(e.pointerId!==viewPointer)return;azimuth-=(e.clientX-viewX)*.006;elevation=THREE.MathUtils.clamp(elevation+(e.clientY-viewY)*.004,.18,1.35);viewX=e.clientX;viewY=e.clientY;updateCamera();return;}
+ if(viewDrag){if(e.pointerId!==viewPointer)return;if(bowlTap&&!bowlTap.moved)return;azimuth-=(e.clientX-viewX)*.006;elevation=THREE.MathUtils.clamp(elevation+(e.clientY-viewY)*.004,.18,1.35);viewX=e.clientX;viewY=e.clientY;updateCamera();return;}
  if(!drag)return;
  const p=point(e);if(!p||!lastPoint)return;
  const now=performance.now(),dt=Math.max(.008,(now-lastTime)/1000);
@@ -214,13 +251,15 @@ window.addEventListener('blur',release);document.addEventListener('visibilitycha
 function updateCamera(){
  const baseDistance=innerWidth/innerHeight<1.2?7.2:5.6;
  const mobile=matchMedia('(max-width: 600px), (pointer: coarse) and (max-height: 600px)').matches;
- const distance=baseDistance*(mobile?1.25:1);
+ // Fit both bowl and mallet by horizontal field of view on narrow screens.
+ const horizontalFit=4.8/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
+ const distance=mobile?Math.max(baseDistance*1.45,horizontalFit):baseDistance;
  const horizontal=Math.cos(elevation)*distance;
  camera.position.set(Math.sin(azimuth)*horizontal,.5+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
  camera.lookAt(0,.5,0);
 }
 function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;updateCamera();camera.updateProjectionMatrix()}
-addEventListener('resize',resize);resize();
+addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize);resize();
 
 let prev=performance.now();function frame(now){requestAnimationFrame(frame);updatePlayButton();const dt=Math.min(.05,(now-prev)/1000);prev=now;
  if(autoHit){
