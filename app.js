@@ -62,14 +62,14 @@ new GLTFLoader().load('./assets/cat-grip.glb',gltf=>{
  kitten.add(gltf.scene);
  gltf.scene.traverse(object=>{if(object.isMesh){object.castShadow=true;object.receiveShadow=true;}});
 },undefined,error=>{console.error('고양이 모델을 불러오지 못했습니다.',error)});
-mallet.position.set(1.5,1.16,.15);mallet.rotation.z=-Math.PI/9;
-let viewDrag=false,viewPointer=null,viewX=0,viewY=0,azimuth=0,elevation=.665;
+mallet.position.set(1.5,1.16,.15);mallet.rotation.z=-Math.PI/12;
+let viewDrag=false,viewPointer=null,viewX=0,viewY=0,azimuth=0,elevation=.665-THREE.MathUtils.degToRad(13);
 // Account for the inward reach of the tilted leather cylinder, not just its origin.
 const bowlOuterRadius=1.27;
-const malletTilt=Math.PI/9;
+const malletTilt=Math.PI/12;
 const contactRadius=bowlOuterRadius+.38*Math.sin(malletTilt+.05)+.145*Math.cos(malletTilt+.05)+.015;
 const restingRadius=contactRadius+.16;
-mallet.position.set(restingRadius,1.16,.15);
+mallet.position.set(restingRadius*Math.cos(Math.PI/3),1.16,-restingRadius*Math.sin(Math.PI/3));
 const toolTarget=mallet.position.clone();
 const grabOffset=new THREE.Vector2();
 // Keep the display awake only during an active listening session.
@@ -315,7 +315,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
  const actualRadius=Math.hypot(mallet.position.x,mallet.position.z);
  if(actualRadius<contactRadius){mallet.position.x*=contactRadius/actualRadius;mallet.position.z*=contactRadius/actualRadius;}
  const angle=Math.atan2(mallet.position.z,mallet.position.x);
- mallet.rotation.set(Math.sin(angle)*(Math.PI/9+recoil*2),0,-Math.cos(angle)*(Math.PI/9+recoil*2));
+ mallet.rotation.set(Math.sin(angle)*(malletTilt+recoil*2),0,-Math.cos(angle)*(malletTilt+recoil*2));
  energy=stepEnergy(energy,dt,tangent,drag&&contact&&now-lastMove<100);frictionEnergy=stepEnergy(frictionEnergy,dt,tangent,drag&&contact&&now-lastMove<100);if(loopGain)loopGain.gain.setTargetAtTime(physical||frictionEnergy<.002?0:frictionEnergy*.32,ctx.currentTime,.12);group.rotation.z=Math.sin(now*.06)*energy*.0015;document.querySelector('#energy').style.width=`${energy*100}%`;renderer.render(scene,camera)}requestAnimationFrame(frame);
 
 const strengthSlider=document.querySelector('#strength-slider');
