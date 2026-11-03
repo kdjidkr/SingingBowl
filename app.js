@@ -36,8 +36,26 @@ metal.bumpMap=new THREE.CanvasTexture(bandRelief);metal.bumpScale=.009;
 metal.map.anisotropy=metal.bumpMap.anisotropy=renderer.capabilities.getMaxAnisotropy();
 const bowl=new THREE.Mesh(new THREE.LatheGeometry(points,160),metal);bowl.castShadow=true;bowl.receiveShadow=true;group.add(bowl);
 // The continuous wall profile supplies a thin lip, without an ornamental rim.
-const pad=new THREE.Mesh(new THREE.CylinderGeometry(.52,.55,.06,64),new THREE.MeshStandardMaterial({color:'#6a5b48',roughness:1}));pad.position.y=-.035;pad.castShadow=true;scene.add(pad);
-floor.position.y=-.07;
+// A burgundy fabric ring with subtle curved gold stitching.
+const textile=document.createElement('canvas');textile.width=1024;textile.height=512;
+const weave=textile.getContext('2d');weave.fillStyle='#702f32';weave.fillRect(0,0,1024,512);
+// Gold brocade spans the full texture so it remains visible around the ring.
+for(let y=0;y<512;y+=5){weave.fillStyle=y%10?'#ffffff04':'#22080a08';weave.fillRect(0,y,1024,1)}
+weave.fillStyle='#d4ad69';weave.strokeStyle='#ead29b';
+for(let y=-64;y<576;y+=128){for(let x=-96;x<1120;x+=192){
+ weave.save();weave.translate(x+(Math.floor((y+64)/128)%2)*96,y+64);
+ weave.globalAlpha=.78;
+ for(let i=0;i<8;i++){weave.save();weave.rotate(i*Math.PI/4);weave.beginPath();weave.moveTo(0,0);weave.bezierCurveTo(-13,-15,-12,-33,0,-42);weave.bezierCurveTo(12,-33,13,-15,0,0);weave.fill();weave.restore()}
+ weave.fillStyle='#f1d9a1';weave.beginPath();weave.arc(0,0,7,0,Math.PI*2);weave.fill();
+ weave.globalAlpha=.65;weave.lineWidth=2.5;weave.beginPath();weave.moveTo(40,0);weave.bezierCurveTo(56,-23,70,25,96,0);weave.stroke();
+ weave.beginPath();weave.moveTo(-40,0);weave.bezierCurveTo(-56,23,-70,-25,-96,0);weave.stroke();
+ for(const side of [-1,1]){weave.save();weave.scale(side,1);weave.beginPath();weave.moveTo(59,0);weave.quadraticCurveTo(63,-17,76,-15);weave.quadraticCurveTo(75,-3,59,0);weave.fill();weave.restore()}
+ weave.restore();
+}}
+const cushionTexture=new THREE.CanvasTexture(textile);cushionTexture.colorSpace=THREE.SRGBColorSpace;cushionTexture.anisotropy=renderer.capabilities.getMaxAnisotropy();
+const cushion=new THREE.Mesh(new THREE.TorusGeometry(.55,.29,40,128),new THREE.MeshStandardMaterial({map:cushionTexture,roughness:.9}));
+cushion.rotation.x=Math.PI/2;cushion.scale.z=.38;cushion.position.y=-.065;cushion.castShadow=true;cushion.receiveShadow=true;scene.add(cushion);
+floor.position.y=-.18;
 const mallet=new THREE.Group();scene.add(mallet);
 const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.115,.12,1.2,40),new THREE.MeshStandardMaterial({color:'#493020',roughness:.48}));shaft.position.y=.48;mallet.add(shaft);
 const leather=new THREE.Mesh(new THREE.CylinderGeometry(.145,.145,.56,40),new THREE.MeshStandardMaterial({color:'#211d19',roughness:.9}));leather.position.y=-.1;mallet.add(leather);mallet.traverse(o=>{if(o.isMesh)o.castShadow=true});
@@ -283,11 +301,12 @@ function updateCamera(){
  const mobile=matchMedia('(max-width: 600px), (pointer: coarse) and (max-height: 600px)').matches;
  // Fit both bowl and mallet by horizontal field of view on narrow screens.
  const horizontalFit=5.4/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
- const distance=mobile?Math.max(baseDistance*1.45,horizontalFit)/1.3:baseDistance;
+ const distance=mobile?Math.max(baseDistance*1.45,horizontalFit)/1.2:baseDistance;
  const horizontal=Math.cos(elevation)*distance;
- const targetX=mobile?.35:0;
- camera.position.set(targetX+Math.sin(azimuth)*horizontal,.5+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
- camera.lookAt(targetX,.5,0);
+ const targetX=mobile?0:0;
+ const targetY=mobile?.25:.5;
+ camera.position.set(targetX+Math.sin(azimuth)*horizontal,targetY+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
+ camera.lookAt(targetX,targetY,0);
 }
 function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;updateCamera();camera.updateProjectionMatrix()}
 addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize);resize();
