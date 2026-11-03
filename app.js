@@ -72,6 +72,23 @@ const restingRadius=contactRadius+.16;
 mallet.position.set(restingRadius,1.16,.15);
 const toolTarget=mallet.position.clone();
 const grabOffset=new THREE.Vector2();
+// Keep the display awake only during an active listening session.
+let screenLock=null,screenLockWanted=false,screenLockRequest=0;
+async function keepScreenOn(){
+ screenLockWanted=true;
+ if(!navigator.wakeLock||screenLock||document.hidden)return;
+ const request=++screenLockRequest;
+ try{
+  const lock=await navigator.wakeLock.request('screen');
+  if(!screenLockWanted||request!==screenLockRequest||document.hidden){await lock.release();return;}
+  screenLock=lock;lock.addEventListener('release',()=>{if(screenLock===lock)screenLock=null;},{once:true});
+ }catch(error){console.info('화면 켜짐 유지가 지원되지 않거나 허용되지 않았습니다.',error.name);}
+}
+function releaseScreen(){
+ screenLockWanted=false;screenLockRequest++;
+ const lock=screenLock;screenLock=null;
+ if(lock)lock.release().catch(()=>{});
+}
 let autoHit=null,playMode='auto',repeating=false,repeatTimer=null,requestId=0,autoPending=false;
 let recoil=0;
 let frictionEnergy=0;
@@ -107,7 +124,7 @@ function applyTone(){
 const bytes=fetch('./assets/bowl-fsharp2-trimmed.mp3').then(r=>{if(!r.ok)throw Error('음원 로딩 실패');return r.arrayBuffer()});bytes.catch(()=>hint.textContent='음원을 불러오지 못했습니다. 새로고침해 주세요.');
 let ready;
 function initAudio(){
- if(!ctx){ctx=new AudioContext();master=ctx.createGain();master.gain.value=muted?0:.65;const limiter=ctx.createDynamicsCompressor();limiter.threshold.value=-2;limiter.knee.value=3;limiter.ratio.value=4;toneFilter=ctx.createBiquadFilter();toneFilter.type='highpass';toneFilter.Q.value=.5;toneFilter.frequency.value=tone.cutoff;bodyFilter=ctx.createBiquadFilter();bodyFilter.type='peaking';bodyFilter.frequency.value=182*tone.rate;bodyFilter.Q.value=.75;bodyFilter.gain.value=0;master.connect(ctx.destination);
+ if(!ctx){ctx=new AudioContext();master=ctx.createGain();master.gain.value=muted?0:Number(document.querySelector('#volume').value)/100;const outputBoost=ctx.createGain();outputBoost.gain.value=2.5;const limiter=ctx.createDynamicsCompressor();limiter.threshold.value=-4;limiter.knee.value=2;limiter.ratio.value=12;limiter.attack.value=.003;limiter.release.value=.25;toneFilter=ctx.createBiquadFilter();toneFilter.type='highpass';toneFilter.Q.value=.5;toneFilter.frequency.value=tone.cutoff;bodyFilter=ctx.createBiquadFilter();bodyFilter.type='peaking';bodyFilter.frequency.value=182*tone.rate;bodyFilter.Q.value=.75;bodyFilter.gain.value=0;master.connect(outputBoost);outputBoost.connect(limiter);limiter.connect(ctx.destination);
  ready=bytes.then(b=>ctx.decodeAudioData(b)).then(b=>{buffer=b;
  // Loop only the recorded resonance, crossfading the seam; never loop the strike.
  const rate=b.sampleRate,length=Math.floor(rate*4),fade=Math.floor(rate*.4),tail=ctx.createBuffer(b.numberOfChannels,length,rate);
@@ -116,16 +133,16 @@ function initAudio(){
  });ready.catch(()=>hint.textContent='음원을 재생할 수 없습니다. 새로고침해 주세요.');}
  ctx.resume();return ready;
 }
-let catCount=0;
 function addCatMark(){
  const container=document.querySelector('#cat-marks');
- catCount++;
- const mark=document.createElement('span');mark.className=catCount%5===0?'cat-mark gold':'cat-mark';
+ const cellSize=container.clientWidth/6;
+ const rows=Math.max(1,Math.floor(container.clientHeight/cellSize));
+ const capacity=rows*6;
+ if(container.children.length>=capacity)container.replaceChildren();
+ container.lastElementChild?.classList.remove('gold');
+ const mark=document.createElement('span');mark.className='cat-mark gold';
  mark.innerHTML='<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.3 14.1 5.7 6l6.1 3.1a15 15 0 0 1 8.4 0L26.3 6l.4 8.1c1 1.8 1.1 4 .4 5.9-1.3 3.6-5.2 5.7-11.1 5.7S6.2 23.6 4.9 20c-.7-1.9-.6-4.1.4-5.9Z"/><path d="M11.2 16.1h.1m9.4 0h.1M14.2 19.1l1.8 1.2 1.8-1.2M16 20.3v1.2m-7.7-2.1-2.8-.5m17.9.5 2.8-.5"/></svg>';
  container.appendChild(mark);
- // Keep the visible trail bounded to the available viewport.
- const capacity=Math.max(1,Math.floor(container.clientWidth/62)*Math.floor(container.clientHeight/62));
- while(container.children.length>capacity)container.firstElementChild.remove();
 }
 function strike(speed,profile=null){
  if(!buffer)return;
@@ -160,17 +177,19 @@ root.addEventListener('pointerup',async e=>{
  const tap=bowlTap;bowlTap=null;
  if(!tap||tap.id!==e.pointerId||tap.moved||performance.now()-tap.time>450)return;
  point(e);if(!ray.intersectObject(bowl,false).length)return;
+ keepScreenOn();
  const ticket=requestId;
  try{
   const readyAudio=initAudio();await readyAudio;
   if(ticket!==requestId)return;
   clearTimeout(repeatTimer);repeatTimer=null;
   const profile=automaticProfile(Number(document.querySelector('#strength-slider').value)+2);
+  repeating=document.querySelector('#autoplay').checked;
   strike(profile.speed,profile);energy=impactEnergy(energy,profile.speed);recoil=.005+.02*profile.gain;
   const direction=new THREE.Vector2(mallet.position.x,mallet.position.z).normalize();
   // Sound fires on touch; the shared animation must not fire it a second time.
   autoHit={start:performance.now()-.22*1000,direction,struck:true,from:Math.hypot(mallet.position.x,mallet.position.z),profile};
- }catch(error){hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';}
+ }catch(error){releaseScreen();hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';}
 },true);
 root.addEventListener('pointerdown',e=>{
  if(drag||viewDrag||autoHit||e.button!==0)return;
@@ -215,20 +234,24 @@ root.addEventListener('pointermove',e=>{
 
 function release(){viewDrag=false;viewPointer=null;drag=false;contact=false;tangent=0;lastPoint=null;root.classList.remove('dragging')}
 for(const type of ['pointerup','pointercancel','lostpointercapture'])root.addEventListener(type,release);
-function stop(){cancelRepeat();requestId++;autoPending=false;autoHit=null;energy=0;frictionEnergy=0;if(ctx){loopGain?.gain.setTargetAtTime(0,ctx.currentTime,.03);for(const v of active){v.g.gain.setTargetAtTime(0,ctx.currentTime,.025);v.src.stop(ctx.currentTime+.2)}active.clear()}}
+function stop(){releaseScreen();cancelRepeat();requestId++;autoPending=false;autoHit=null;energy=0;frictionEnergy=0;if(ctx){loopGain?.gain.setTargetAtTime(0,ctx.currentTime,.03);for(const v of active){v.g.gain.setTargetAtTime(0,ctx.currentTime,.025);v.src.stop(ctx.currentTime+.2)}active.clear()}}
 
 function cancelRepeat(){repeating=false;clearTimeout(repeatTimer);repeatTimer=null;document.querySelector('#autoplay').checked=false;}
 function queueAutoplay(){
+ if(!repeating&&!active.size&&!autoHit&&!autoPending)releaseScreen();
  if(!repeating||active.size||autoHit||autoPending)return;
  clearTimeout(repeatTimer);
- repeatTimer=setTimeout(()=>{repeatTimer=null;if(repeating&&!active.size&&!autoHit&&!autoPending)triggerHit();},5000);
+ repeatTimer=setTimeout(()=>{repeatTimer=null;if(repeating&&!active.size&&!autoHit&&!autoPending)triggerHit();},2000);
 }
 document.querySelector('#autoplay').onchange=e=>{
  repeating=e.currentTarget.checked;clearTimeout(repeatTimer);repeatTimer=null;
+ if(!repeating&&!active.size&&!autoHit&&!autoPending)releaseScreen();
  if(repeating&&!active.size&&!autoHit&&!autoPending)triggerHit();
 };
 async function triggerHit(){
  if(autoHit||autoPending||playMode!=='auto')return;
+ keepScreenOn();
+ repeating=document.querySelector('#autoplay').checked;
  const ticket=requestId;autoPending=true;
  try{
   await initAudio();
@@ -236,7 +259,7 @@ async function triggerHit(){
   release();
   const direction=new THREE.Vector2(mallet.position.x,mallet.position.z).normalize();
   autoHit={start:performance.now(),direction,struck:false,from:Math.hypot(mallet.position.x,mallet.position.z),profile:automaticProfile(Number(document.querySelector('#strength-slider').value)+2)};
- }catch(error){cancelRepeat();hint.style.opacity='1';hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';}
+ }catch(error){releaseScreen();cancelRepeat();hint.style.opacity='1';hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';}
  finally{if(ticket===requestId){autoPending=false;queueAutoplay();}}
 }
 const playButton=document.querySelector('#play-once');
@@ -249,7 +272,11 @@ function updatePlayButton(){
  if(playButton.getAttribute('aria-pressed')!==state)playButton.setAttribute('aria-pressed',state);
 }
 
-document.querySelector('#mute').onclick=e=>{muted=!muted;const button=e.currentTarget;button.dataset.muted=String(muted);button.setAttribute('aria-label',muted?'소리 켜기':'소리 끄기');button.title=muted?'소리 켜기':'소리 끄기';if(master)master.gain.setTargetAtTime(muted?0:.65,ctx.currentTime,.03)};
+document.querySelector('#mute').onclick=e=>{muted=!muted;const button=e.currentTarget;button.dataset.muted=String(muted);button.setAttribute('aria-label',muted?'소리 켜기':'소리 끄기');button.title=muted?'소리 켜기':'소리 끄기';if(master)master.gain.setTargetAtTime(muted?0:Number(document.querySelector('#volume').value)/100,ctx.currentTime,.03)};
+document.querySelector('#volume').addEventListener('input',e=>{
+ const value=Number(e.currentTarget.value)/100;
+ if(master)master.gain.setTargetAtTime(muted?0:value,ctx.currentTime,.03);
+});
 window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();stop()}});
 function updateCamera(){
  const baseDistance=innerWidth/innerHeight<1.2?8.3:7.5;
@@ -293,7 +320,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
 const strengthSlider=document.querySelector('#strength-slider');
 function updateStrength(){
  strengthSlider.style.setProperty('--fill',((Number(strengthSlider.value)-1)/2*100)+'%');
- const labels=['1단계','2단계','3단계'];
+ const labels=['하','중','상'];
  strengthSlider.setAttribute('aria-valuetext',labels[Number(strengthSlider.value)-1]);
  for(const button of document.querySelectorAll('[data-strength]'))button.setAttribute('aria-pressed',String(button.dataset.strength===strengthSlider.value));
 }
