@@ -283,7 +283,7 @@ function updateCamera(){
  const mobile=matchMedia('(max-width: 600px), (pointer: coarse) and (max-height: 600px)').matches;
  // Fit both bowl and mallet by horizontal field of view on narrow screens.
  const horizontalFit=5.4/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
- const distance=mobile?Math.max(baseDistance*1.45,horizontalFit):baseDistance;
+ const distance=mobile?Math.max(baseDistance*1.45,horizontalFit)/1.3:baseDistance;
  const horizontal=Math.cos(elevation)*distance;
  const targetX=mobile?.35:0;
  camera.position.set(targetX+Math.sin(azimuth)*horizontal,.5+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
