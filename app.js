@@ -284,6 +284,21 @@ function updatePlayButton(){
  if(playButton.getAttribute('aria-pressed')!==state)playButton.setAttribute('aria-pressed',state);
 }
 
+let shareStatusTimer;
+const shareStatus=document.querySelector('#share-status');
+function showShareStatus(message){shareStatus.textContent=message;clearTimeout(shareStatusTimer);shareStatusTimer=setTimeout(()=>shareStatus.textContent='',3000)}
+document.querySelector('#share').addEventListener('click',async()=>{
+ const url=location.href;
+ try{
+  if(navigator.share){await navigator.share({title:document.title,url});return}
+  if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');
+  await navigator.clipboard.writeText(url);showShareStatus('주소를 복사했어요');
+ }catch(error){
+  if(error.name==='AbortError')return;
+  if(navigator.share&&navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(url);showShareStatus('주소를 복사했어요');return}catch{}}
+  showShareStatus('주소창에서 주소를 복사해 주세요');
+ }
+});
 document.querySelector('#mute').onclick=e=>{muted=!muted;const button=e.currentTarget;button.dataset.muted=String(muted);button.setAttribute('aria-label',muted?'소리 켜기':'소리 끄기');button.title=muted?'소리 켜기':'소리 끄기';if(master)master.gain.setTargetAtTime(muted?0:Number(document.querySelector('#volume').value)/100,ctx.currentTime,.03)};
 document.querySelector('#volume').addEventListener('input',e=>{
  const value=Number(e.currentTarget.value)/100;
