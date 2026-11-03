@@ -282,11 +282,12 @@ function updateCamera(){
  const baseDistance=innerWidth/innerHeight<1.2?8.3:7.5;
  const mobile=matchMedia('(max-width: 600px), (pointer: coarse) and (max-height: 600px)').matches;
  // Fit both bowl and mallet by horizontal field of view on narrow screens.
- const horizontalFit=4.8/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
+ const horizontalFit=5.4/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
  const distance=mobile?Math.max(baseDistance*1.45,horizontalFit):baseDistance;
  const horizontal=Math.cos(elevation)*distance;
- camera.position.set(Math.sin(azimuth)*horizontal,.5+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
- camera.lookAt(0,.5,0);
+ const targetX=mobile?.35:0;
+ camera.position.set(targetX+Math.sin(azimuth)*horizontal,.5+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
+ camera.lookAt(targetX,.5,0);
 }
 function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;updateCamera();camera.updateProjectionMatrix()}
 addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize);resize();
@@ -320,7 +321,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
 const strengthSlider=document.querySelector('#strength-slider');
 function updateStrength(){
  strengthSlider.style.setProperty('--fill',((Number(strengthSlider.value)-1)/2*100)+'%');
- const labels=['하','중','상'];
+ const labels=['약','중','강'];
  strengthSlider.setAttribute('aria-valuetext',labels[Number(strengthSlider.value)-1]);
  for(const button of document.querySelectorAll('[data-strength]'))button.setAttribute('aria-pressed',String(button.dataset.strength===strengthSlider.value));
 }
