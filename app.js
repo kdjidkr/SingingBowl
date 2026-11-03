@@ -14,8 +14,9 @@ const sun=new THREE.DirectionalLight('#fff2d5',3.2);sun.position.set(-3,7,4);sun
 const floor=new THREE.Mesh(new THREE.PlaneGeometry(100,100),new THREE.MeshStandardMaterial({color:'#b9ac96',roughness:1}));floor.rotation.x=-Math.PI/2;floor.position.y=-.23;floor.receiveShadow=true;scene.add(floor);
 const group=new THREE.Group();scene.add(group);
 // Rounded lower body and nearly vertical upper walls, following the reference.
-const profile=[[0,0],[.3,0],[.5,.015],[.69,.065],[.86,.15],[1.01,.27],[1.13,.42],[1.21,.59],[1.25,.77],[1.267,.94],[1.27,1.08],[1.237,1.08],[1.233,.95],[1.216,.78],[1.176,.61],[1.097,.45],[.98,.31],[.83,.2],[.66,.12],[.48,.07],[.28,.055],[0,.055]];
-const profileCurve=new THREE.SplineCurve(profile.map(p=>new THREE.Vector2(...p)));
+const profile=[[0,0],[.3,0],[.5,.015],[.69,.065],[.86,.15],[1.01,.27],[1.13,.42],[1.23,.59],[1.27,.77],[1.27,.94],[1.25,1.08],[1.217,1.08],[1.236,.95],[1.236,.78],[1.196,.61],[1.097,.45],[.98,.31],[.83,.2],[.66,.12],[.48,.07],[.28,.055],[0,.055]];
+const bowlHeightScale=1.12;
+const profileCurve=new THREE.SplineCurve(profile.map(([radius,height])=>new THREE.Vector2(radius,height*bowlHeightScale)));
 const points=profileCurve.getPoints(240).map(p=>new THREE.Vector2(Math.max(0,p.x),p.y));
 // Fine deterministic surface variation avoids mirror-polished tableware highlights.
 const grainSize=128,grainBytes=new Uint8Array(grainSize*grainSize*4);let grainSeed=73;
@@ -36,26 +37,19 @@ metal.bumpMap=new THREE.CanvasTexture(bandRelief);metal.bumpScale=.009;
 metal.map.anisotropy=metal.bumpMap.anisotropy=renderer.capabilities.getMaxAnisotropy();
 const bowl=new THREE.Mesh(new THREE.LatheGeometry(points,160),metal);bowl.castShadow=true;bowl.receiveShadow=true;group.add(bowl);
 // The continuous wall profile supplies a thin lip, without an ornamental rim.
-// A burgundy fabric ring with subtle curved gold stitching.
-const textile=document.createElement('canvas');textile.width=1024;textile.height=512;
-const weave=textile.getContext('2d');weave.fillStyle='#702f32';weave.fillRect(0,0,1024,512);
-// Gold brocade spans the full texture so it remains visible around the ring.
-for(let y=0;y<512;y+=5){weave.fillStyle=y%10?'#ffffff04':'#22080a08';weave.fillRect(0,y,1024,1)}
-weave.fillStyle='#d4ad69';weave.strokeStyle='#ead29b';
-for(let y=-64;y<576;y+=128){for(let x=-96;x<1120;x+=192){
- weave.save();weave.translate(x+(Math.floor((y+64)/128)%2)*96,y+64);
- weave.globalAlpha=.78;
- for(let i=0;i<8;i++){weave.save();weave.rotate(i*Math.PI/4);weave.beginPath();weave.moveTo(0,0);weave.bezierCurveTo(-13,-15,-12,-33,0,-42);weave.bezierCurveTo(12,-33,13,-15,0,0);weave.fill();weave.restore()}
- weave.fillStyle='#f1d9a1';weave.beginPath();weave.arc(0,0,7,0,Math.PI*2);weave.fill();
- weave.globalAlpha=.65;weave.lineWidth=2.5;weave.beginPath();weave.moveTo(40,0);weave.bezierCurveTo(56,-23,70,25,96,0);weave.stroke();
- weave.beginPath();weave.moveTo(-40,0);weave.bezierCurveTo(-56,23,-70,-25,-96,0);weave.stroke();
- for(const side of [-1,1]){weave.save();weave.scale(side,1);weave.beginPath();weave.moveTo(59,0);weave.quadraticCurveTo(63,-17,76,-15);weave.quadraticCurveTo(75,-3,59,0);weave.fill();weave.restore()}
- weave.restore();
-}}
-const cushionTexture=new THREE.CanvasTexture(textile);cushionTexture.colorSpace=THREE.SRGBColorSpace;cushionTexture.anisotropy=renderer.capabilities.getMaxAnisotropy();
-const cushion=new THREE.Mesh(new THREE.TorusGeometry(.55,.29,40,128),new THREE.MeshStandardMaterial({map:cushionTexture,roughness:.9}));
-cushion.rotation.x=Math.PI/2;cushion.scale.z=.38;cushion.position.y=-.065;cushion.castShadow=true;cushion.receiveShadow=true;scene.add(cushion);
-floor.position.y=-.18;
+// Close the hollow bowl only for the shadow pass, preventing light leaking through its underside.
+const shadowSealMaterial=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false,side:THREE.DoubleSide});
+const shadowSeal=new THREE.Mesh(new THREE.CircleGeometry(1.2,96),shadowSealMaterial);
+shadowSeal.rotation.x=-Math.PI/2;shadowSeal.position.y=.82*bowlHeightScale;shadowSeal.castShadow=true;group.add(shadowSeal);
+// A soft contact shadow anchors the bowl where its base meets the floor.
+const contactCanvas=document.createElement('canvas');contactCanvas.width=256;contactCanvas.height=256;
+const contactContext=contactCanvas.getContext('2d');
+const contactGradient=contactContext.createRadialGradient(128,128,12,128,128,128);
+contactGradient.addColorStop(0,'rgba(55,39,22,.48)');contactGradient.addColorStop(.48,'rgba(55,39,22,.27)');contactGradient.addColorStop(1,'rgba(55,39,22,0)');
+contactContext.fillStyle=contactGradient;contactContext.fillRect(0,0,256,256);
+const contactShadow=new THREE.Mesh(new THREE.PlaneGeometry(1.9,1.9),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(contactCanvas),transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1}));
+contactShadow.rotation.x=-Math.PI/2;contactShadow.position.y=.003;scene.add(contactShadow);
+floor.position.y=0;
 const mallet=new THREE.Group();scene.add(mallet);
 const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.115,.12,1.2,40),new THREE.MeshStandardMaterial({color:'#493020',roughness:.48}));shaft.position.y=.48;mallet.add(shaft);
 const leather=new THREE.Mesh(new THREE.CylinderGeometry(.145,.145,.56,40),new THREE.MeshStandardMaterial({color:'#211d19',roughness:.9}));leather.position.y=-.1;mallet.add(leather);mallet.traverse(o=>{if(o.isMesh)o.castShadow=true});
@@ -83,7 +77,7 @@ new GLTFLoader().load('./assets/cat-grip.glb',gltf=>{
 mallet.position.set(1.5,1.16,.15);mallet.rotation.z=-Math.PI/12;
 let viewDrag=false,viewPointer=null,viewX=0,viewY=0,azimuth=0,elevation=.665-THREE.MathUtils.degToRad(13);
 // Account for the inward reach of the tilted leather cylinder, not just its origin.
-const bowlOuterRadius=1.27;
+const bowlOuterRadius=1.25;
 const malletTilt=Math.PI/12;
 const contactRadius=bowlOuterRadius+.38*Math.sin(malletTilt+.05)+.145*Math.cos(malletTilt+.05)+.015;
 const restingRadius=contactRadius+.16;
@@ -179,7 +173,7 @@ function strike(speed,profile=null){
  src.onended=()=>{active.delete(voice);src.disconnect();g.disconnect();queueAutoplay();};
 }
 
-const ray=new THREE.Raycaster(),pointer=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-1.08);
+const ray=new THREE.Raycaster(),pointer=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-1.08*bowlHeightScale);
 function point(e){const rect=root.getBoundingClientRect();pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera);const p=new THREE.Vector3();return ray.ray.intersectPlane(plane,p)}
 let bowlTap=null;
 root.addEventListener('pointerdown',e=>{
@@ -307,6 +301,16 @@ function updateCamera(){
  const targetY=mobile?.25:.5;
  camera.position.set(targetX+Math.sin(azimuth)*horizontal,targetY+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
  camera.lookAt(targetX,targetY,0);
+ // Center the bowl between the upper strength selector and the lower action.
+ camera.clearViewOffset();
+ camera.updateMatrixWorld();
+ camera.updateProjectionMatrix();
+ const upper=document.querySelector('.strength-glass').getBoundingClientRect();
+ const lower=document.querySelector('#play-once').getBoundingClientRect();
+ const centerY=upper.bottom+(lower.top-upper.bottom)*.62;
+ const bowlCenter=new THREE.Vector3(0,.45,0).project(camera);
+ const currentY=(1-bowlCenter.y)*innerHeight/2;
+ camera.setViewOffset(innerWidth,innerHeight,0,currentY-centerY,innerWidth,innerHeight);
 }
 function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;updateCamera();camera.updateProjectionMatrix()}
 addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize);resize();
@@ -329,7 +333,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
  const radius=Math.hypot(toolTarget.x,toolTarget.z);
  const targetPosition=toolTarget.clone();
  if(radius>0)targetPosition.multiplyScalar(1+recoil/radius);
- targetPosition.y=.07+hitHeight*1.08;
+ targetPosition.y=.07+hitHeight*1.08*bowlHeightScale;
  mallet.position.lerp(targetPosition,1-Math.exp(-dt*65));
  const actualRadius=Math.hypot(mallet.position.x,mallet.position.z);
  if(actualRadius<contactRadius){mallet.position.x*=contactRadius/actualRadius;mallet.position.z*=contactRadius/actualRadius;}
