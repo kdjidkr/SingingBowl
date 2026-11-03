@@ -1,4 +1,5 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
 import {stepEnergy,impactEnergy,strikeResponse,modalResponse,automaticProfile} from './physics.mjs';
 const root=document.querySelector('#scene'),hint=document.querySelector('#hint');
 const scene=new THREE.Scene();scene.background=new THREE.Color('#bdb2a0');scene.fog=new THREE.Fog('#bdb2a0',12,25);
@@ -40,25 +41,27 @@ floor.position.y=-.07;
 const mallet=new THREE.Group();scene.add(mallet);
 const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.115,.12,1.2,40),new THREE.MeshStandardMaterial({color:'#493020',roughness:.48}));shaft.position.y=.48;mallet.add(shaft);
 const leather=new THREE.Mesh(new THREE.CylinderGeometry(.145,.145,.56,40),new THREE.MeshStandardMaterial({color:'#211d19',roughness:.9}));leather.position.y=-.1;mallet.add(leather);mallet.traverse(o=>{if(o.isMesh)o.castShadow=true});
-// One continuous mitten silhouette; no separate finger or palm blobs.
-const hand=new THREE.Group();mallet.add(hand);
-const skin=new THREE.MeshStandardMaterial({color:'#f4ddbd',roughness:.82});
-const outline=new THREE.Shape();
-outline.moveTo(.34,-.105);
-outline.bezierCurveTo(.17,-.11,.06,-.18,-.085,-.16);
-outline.bezierCurveTo(-.22,-.15,-.24,-.055,-.22,.055);
-outline.bezierCurveTo(-.21,.15,-.15,.19,-.06,.18);
-outline.bezierCurveTo(-.015,.18,.015,.16,.055,.14);
-outline.bezierCurveTo(.04,.235,.11,.26,.16,.22);
-outline.bezierCurveTo(.21,.19,.19,.11,.22,.105);
-outline.bezierCurveTo(.26,.09,.31,.095,.34,.095);
-outline.closePath();
-const gripGeometry=new THREE.ExtrudeGeometry(outline,{depth:.12,bevelEnabled:true,bevelSegments:6,steps:1,bevelSize:.055,bevelThickness:.065,curveSegments:24});
-gripGeometry.translate(0,.57,-.06);
-const grip=new THREE.Mesh(gripGeometry,skin);grip.castShadow=true;hand.add(grip);
-// Short flat-ended cuff instead of a spherical bead at the wrist.
-const cuff=new THREE.Mesh(new THREE.CylinderGeometry(.14,.14,.18,40),new THREE.MeshStandardMaterial({color:'#aab89e',roughness:1}));
-cuff.rotation.z=Math.PI/2;cuff.scale.z=.85;cuff.position.set(.39,.565,0);cuff.castShadow=true;hand.add(cuff);
+// Blender sculpture, exported as a separate scene without lights or floor.
+const kitten=new THREE.Group();mallet.add(kitten);
+kitten.position.set(.04,.06,-.24);kitten.scale.setScalar(.43);kitten.rotation.z=-.45;
+new GLTFLoader().load('./assets/cat-grip.glb',gltf=>{
+ // Gently turn the feet outward while blending the deformation into the body.
+ const sculpt=gltf.scene.getObjectByName('Cat sculpt.003');
+ if(sculpt?.geometry){
+  const geometry=sculpt.geometry.clone(),positions=geometry.attributes.position;
+  for(let i=0;i<positions.count;i++){
+   const x=positions.getX(i),y=positions.getY(i)+.59,z=positions.getZ(i);
+   const weight=THREE.MathUtils.smoothstep(Math.abs(x),.12,.29)*(1-THREE.MathUtils.smoothstep(y,.12,.38))*THREE.MathUtils.smoothstep(z,.05,.22);
+   if(weight<=0)continue;
+   const side=Math.sign(x),angle=side*.20*weight,pivotX=side*.34,pivotZ=.23;
+   const dx=x-pivotX,dz=z-pivotZ,c=Math.cos(angle),sn=Math.sin(angle);
+   positions.setX(i,pivotX+dx*c+dz*sn);positions.setZ(i,pivotZ-dx*sn+dz*c);
+  }
+  positions.needsUpdate=true;geometry.computeVertexNormals();sculpt.geometry=geometry;
+ }
+ kitten.add(gltf.scene);
+ gltf.scene.traverse(object=>{if(object.isMesh){object.castShadow=true;object.receiveShadow=true;}});
+},undefined,error=>{console.error('고양이 모델을 불러오지 못했습니다.',error)});
 mallet.position.set(1.5,1.16,.15);mallet.rotation.z=-Math.PI/9;
 let viewDrag=false,viewPointer=null,viewX=0,viewY=0,azimuth=0,elevation=.665;
 // Account for the inward reach of the tilted leather cylinder, not just its origin.
@@ -249,7 +252,7 @@ function updatePlayButton(){
 document.querySelector('#mute').onclick=e=>{muted=!muted;const button=e.currentTarget;button.dataset.muted=String(muted);button.setAttribute('aria-label',muted?'소리 켜기':'소리 끄기');button.title=muted?'소리 켜기':'소리 끄기';if(master)master.gain.setTargetAtTime(muted?0:.65,ctx.currentTime,.03)};
 window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();stop()}});
 function updateCamera(){
- const baseDistance=innerWidth/innerHeight<1.2?7.2:5.6;
+ const baseDistance=innerWidth/innerHeight<1.2?8.3:7.5;
  const mobile=matchMedia('(max-width: 600px), (pointer: coarse) and (max-height: 600px)').matches;
  // Fit both bowl and mallet by horizontal field of view on narrow screens.
  const horizontalFit=4.8/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
@@ -275,6 +278,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
   if(elapsed>.6){autoHit=null;queueAutoplay();}
  }
  recoil*=Math.exp(-dt*18);
+ kitten.rotation.z=-.45+Math.sin(now*.004)*.015+recoil*.6;
  const radius=Math.hypot(toolTarget.x,toolTarget.z);
  const targetPosition=toolTarget.clone();
  if(radius>0)targetPosition.multiplyScalar(1+recoil/radius);
