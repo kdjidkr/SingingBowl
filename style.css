@@ -113,3 +113,11 @@ body{-webkit-user-select:none;user-select:none}
 @media(max-width:600px){.share-control{top:max(16px,env(safe-area-inset-top));right:calc(16px + 44px + 8px + 68px + 14px + 10px)}}
 #share svg{width:21px;height:21px;pointer-events:none}
 #share-status:not(:empty){position:absolute;top:calc(100% + 6px);right:0;white-space:nowrap;padding:7px 10px;border-radius:12px;background:#f5eee0;color:#514536;font-size:12px;box-shadow:0 3px 12px #49351c18}
+
+/* Stamps appear over controls without blocking interaction. */
+#cat-marks{z-index:3;pointer-events:none}
+
+.play-actions #play-once,.play-actions #rim-turn{min-width:0;width:min(42vw,132px);padding-inline:12px}
+.play-actions #rim-turn{min-height:48px;background:#f7efdf9c;color:#514431;border:1px solid #ffffff70;font-size:14px}
+.play-actions #rim-turn[aria-pressed=true]{background:#655540;color:#fff9ed}
+.play-actions #play-once:disabled{opacity:.5;cursor:default}
