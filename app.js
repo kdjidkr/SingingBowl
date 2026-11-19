@@ -508,7 +508,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
   const angle=orbitStartAngle+orbitAngle;
   toolTarget.set(radius*Math.cos(angle),.86,radius*Math.sin(angle));
   // Build resonance during the first lap, then sustain it.
-  rimSound=Math.min(1,travel)**1.35;
+  rimSound=THREE.MathUtils.lerp(.16,.22,Math.min(1,travel));
   kitten.position.copy(catHome).applyAxisAngle(orbitAxis,-orbitAngle);
   // Keep the torso aligned with the push while the head turns separately.
   push=rimContact*(.09+.025*Math.sin(orbitAngle*9));
@@ -647,4 +647,4 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
   position.needsUpdate=true;
   geometry.computeVertexNormals();
  }
- energy=stepEnergy(energy,dt,tangent,drag&&contact&&now-lastMove<100);frictionEnergy=stepEnergy(frictionEnergy,dt,tangent,drag&&contact&&now-lastMove<100);if(loopGain)loopGain.gain.setTargetAtTime(rimTurn ? rimSound*.28 : (physical||frictionEnergy<.002 ? 0 : frictionEnergy*.32),ctx.currentTime,.12);group.rotation.z=Math.sin(now*.06)*energy*.0015;renderer.render(scene,camera)}requestAnimationFrame(frame);
+ energy=stepEnergy(energy,dt,tangent,drag&&contact&&now-lastMove<100);frictionEnergy=stepEnergy(frictionEnergy,dt,tangent,drag&&contact&&now-lastMove<100);if(loopGain)loopGain.gain.setTargetAtTime(rimTurn ? rimSound : (physical||frictionEnergy<.002 ? 0 : frictionEnergy*.32),ctx.currentTime,.12);group.rotation.z=Math.sin(now*.06)*energy*.0015;renderer.render(scene,camera)}requestAnimationFrame(frame);
