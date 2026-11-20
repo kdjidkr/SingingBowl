@@ -1,6 +1,6 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
-import {stepEnergy,impactEnergy,strikeResponse,modalResponse,automaticProfile} from './physics.mjs';
+import {stepEnergy,impactEnergy,automaticProfile} from './physics.mjs';
 const mediumStrikeStrength=4;
 const root=document.querySelector('#scene'),hint=document.querySelector('#hint');
 const scene=new THREE.Scene();scene.background=new THREE.Color('#bdb2a0');scene.fog=new THREE.Fog('#bdb2a0',12,25);
@@ -197,7 +197,6 @@ const orbitRadius=bowlOuterRadius+.116;
 const walkStart=1.6;
 const walkDuration=18;
 let rimTurn=null;
-const grabOffset=new THREE.Vector2();
 // Keep the display awake only during an active listening session.
 let screenLock=null,screenLockWanted=false,screenLockRequest=0;
 async function keepScreenOn(){
@@ -215,37 +214,10 @@ function releaseScreen(){
  const lock=screenLock;screenLock=null;
  if(lock)lock.release().catch(()=>{});
 }
-let autoHit=null,playMode='auto',repeating=false,repeatTimer=null,requestId=0,autoPending=false;
+let autoHit=null,repeating=false,repeatTimer=null,requestId=0,autoPending=false;
 let recoil=0;
-let frictionEnergy=0;
-let energy=0,drag=false,contact=false,lastPoint=null,lastTime=0,tangent=0,lastMove=0,muted=false,ctx,master,buffer,loopSource,loopGain,toneFilter,bodyFilter;
+let energy=0,muted=false,ctx,master,buffer,loopGain;
 const active=new Set();
-const tones={original:{rate:1,cutoff:20},clear:{rate:2**(3/12),cutoff:35},high:{rate:2**(7/12),cutoff:45}};
-let tone=tones.original;
-let physical=false,hitHeight=1;
-function physicalStrike(speed,profile=null){
- const position=Math.atan2(mallet.position.x,mallet.position.z);
- const modes=modalResponse(speed,position,hitHeight,azimuth);
- const now=ctx.currentTime;
- for(const mode of modes){
-  const src=ctx.createOscillator(),g=ctx.createGain();
-  src.frequency.value=mode.frequency;
-  const amplitude=mode.amplitude*.2;
-  g.gain.setValueAtTime(0,now);g.gain.linearRampToValueAtTime(amplitude,now+.006);
-  g.gain.setTargetAtTime(0,now+.006,mode.decay*(profile?.tail??1)/3);
-  src.connect(g);g.connect(master);src.start(now);src.stop(now+mode.decay*3);
-  const voice={src,g};active.add(voice);
-  src.onended=()=>{active.delete(voice);src.disconnect();g.disconnect();queueAutoplay();};
- }
-}
-
-function applyTone(){
- if(!ctx)return;
- toneFilter.frequency.setTargetAtTime(tone.cutoff,ctx.currentTime,.08);
- bodyFilter.frequency.setTargetAtTime(182*tone.rate,ctx.currentTime,.08);
- loopSource?.playbackRate.setTargetAtTime(tone.rate,ctx.currentTime,.08);
- for(const voice of active)voice.src.playbackRate?.setTargetAtTime(tone.rate,ctx.currentTime,.08);
-}
 
 let ready;
 function resumeAudio(){
@@ -269,12 +241,33 @@ function initAudio(){
    navigator.audioSession.type='playback';
   }
  }catch{}
- if(!ctx){ctx=new AudioContext();master=ctx.createGain();master.gain.value=muted?0:Number(document.querySelector('#volume').value)/100;const outputBoost=ctx.createGain();outputBoost.gain.value=2.5;const limiter=ctx.createDynamicsCompressor();limiter.threshold.value=-4;limiter.knee.value=2;limiter.ratio.value=12;limiter.attack.value=.003;limiter.release.value=.25;toneFilter=ctx.createBiquadFilter();toneFilter.type='highpass';toneFilter.Q.value=.5;toneFilter.frequency.value=tone.cutoff;bodyFilter=ctx.createBiquadFilter();bodyFilter.type='peaking';bodyFilter.frequency.value=182*tone.rate;bodyFilter.Q.value=.75;bodyFilter.gain.value=0;master.connect(outputBoost);outputBoost.connect(limiter);limiter.connect(ctx.destination);
+ if(!ctx){
+  ctx=new AudioContext();
+  master=ctx.createGain();
+  master.gain.value=muted?0:Number(document.querySelector('#volume').value)/100;
+  const outputBoost=ctx.createGain();
+  outputBoost.gain.value=2.5;
+  const limiter=ctx.createDynamicsCompressor();
+  limiter.threshold.value=-4;
+  limiter.knee.value=2;
+  limiter.ratio.value=12;
+  limiter.attack.value=.003;
+  limiter.release.value=.25;
+  master.connect(outputBoost);
+  outputBoost.connect(limiter);
+  limiter.connect(ctx.destination);
  }
  if(!ready)ready=fetch('./assets/bowl-fsharp2.mp3').then(response=>{
   if(!response.ok)throw Error('음원 로딩 실패');
   return response.arrayBuffer();
- }).then(bytes=>ctx.decodeAudioData(bytes)).then(b=>{buffer=b;
+ }).then(bytes=>ctx.decodeAudioData(bytes)).then(decoded=>{
+  startResonanceLoop(decoded);
+  buffer=decoded;
+ }).catch(error=>{ready=null;throw error;});
+ return Promise.all([resumeAudio(),ready]);
+}
+
+function startResonanceLoop(b){
  // Loop only the recorded resonance, crossfading the seam; never loop the strike.
  const rate=b.sampleRate;
  const offset=Math.floor(rate*3);
@@ -319,10 +312,17 @@ function initAudio(){
    out[index]=out[index]*(1-mix)+src[offset+i]*mix;
   }
  }
- loopSource=ctx.createBufferSource();loopSource.buffer=tail;loopSource.loop=true;loopSource.playbackRate.value=tone.rate;loopSource.loopStart=fade/rate;loopGain=ctx.createGain();loopGain.gain.value=0;loopSource.connect(loopGain);loopGain.connect(master);loopSource.start();
- }).catch(error=>{ready=null;throw error;});
- return Promise.all([resumeAudio(),ready]);
+ const loopSource=ctx.createBufferSource();
+ loopSource.buffer=tail;
+ loopSource.loop=true;
+ loopSource.loopStart=fade/rate;
+ loopGain=ctx.createGain();
+ loopGain.gain.value=0;
+ loopSource.connect(loopGain);
+ loopGain.connect(master);
+ loopSource.start();
 }
+
 function addCatMark(){
  const container=document.querySelector('#cat-marks');
  const cellSize=container.clientWidth/6;
@@ -334,15 +334,12 @@ function addCatMark(){
  mark.innerHTML='<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.3 14.1 5.7 6l6.1 3.1a15 15 0 0 1 8.4 0L26.3 6l.4 8.1c1 1.8 1.1 4 .4 5.9-1.3 3.6-5.2 5.7-11.1 5.7S6.2 23.6 4.9 20c-.7-1.9-.6-4.1.4-5.9Z"/><path d="M11.2 16.1h.1m9.4 0h.1M14.2 19.1l1.8 1.2 1.8-1.2M16 20.3v1.2m-7.7-2.1-2.8-.5m17.9.5 2.8-.5"/></svg>';
  container.appendChild(mark);
 }
-function strike(speed,profile=null){
+function strike(profile){
  if(!buffer)return;
- if(physical){addCatMark();physicalStrike(speed,profile);return;}
- const {peak}=strikeResponse(speed);
- // Strong automatic strike preserves the recording; manual hits only scale gain.
- const level=profile?profile.gain:Math.min(1,peak/.3398);
- if(level<.00001)return;
- const src=ctx.createBufferSource(),g=ctx.createGain();
- src.buffer=buffer;src.playbackRate.value=tone.rate;g.gain.value=level;
+ const src=ctx.createBufferSource();
+ const g=ctx.createGain();
+ src.buffer=buffer;
+ g.gain.value=profile.gain;
  src.connect(g);g.connect(master);
  // Preserve the recording's natural decay at every strength.
  // Play the full original file, including its natural tail.
@@ -351,12 +348,12 @@ function strike(speed,profile=null){
  src.onended=()=>{active.delete(voice);src.disconnect();g.disconnect();queueAutoplay();};
 }
 
-const ray=new THREE.Raycaster(),pointer=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-1.08*bowlHeightScale);
-function point(e){const rect=root.getBoundingClientRect();pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera);const p=new THREE.Vector3();return ray.ray.intersectPlane(plane,p)}
+const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();
+function updatePickingRay(e){const rect=root.getBoundingClientRect();pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera)}
 let bowlTap=null;
 root.addEventListener('pointerdown',e=>{
  if(rimTurn||e.button!==0||!e.isPrimary){bowlTap=null;return;}
- point(e);
+ updatePickingRay(e);
  bowlTap=ray.intersectObject(bowl,false).length?{id:e.pointerId,x:e.clientX,y:e.clientY,time:performance.now(),moved:false}:null;
 },true);
 root.addEventListener('pointermove',e=>{
@@ -366,7 +363,7 @@ root.addEventListener('pointercancel',()=>bowlTap=null,true);
 root.addEventListener('pointerup',async e=>{
  const tap=bowlTap;bowlTap=null;
  if(!tap||tap.id!==e.pointerId||tap.moved||performance.now()-tap.time>450)return;
- point(e);if(!ray.intersectObject(bowl,false).length)return;
+ updatePickingRay(e);if(!ray.intersectObject(bowl,false).length)return;
  keepScreenOn();
  const ticket=requestId;
  try{
@@ -380,57 +377,34 @@ root.addEventListener('pointerup',async e=>{
   // Existing audio voices keep playing, even when taps arrive in quick succession.
   mallet.position.set(direction.x*contactRadius,.86,direction.y*contactRadius);
   toolTarget.set(direction.x*contactRadius,1.15,direction.y*contactRadius);
-  strike(profile.speed,profile);energy=impactEnergy(energy,profile.speed);
+  strike(profile);energy=impactEnergy(energy,profile.speed);
   recoil=.005+.02*profile.gain;
   autoHit={start:performance.now()-1080,direction,struck:true,from:contactRadius,profile};
  }catch(error){releaseScreen();hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';}
 },true);
 root.addEventListener('pointerdown',e=>{
- if(drag||viewDrag||autoHit||e.button!==0||!e.isPrimary)return;
- // During rim playback, every scene drag controls only the camera.
- let grabMallet=false;
- if(!rimTurn&&playMode==='direct'){
-  point(e);
-  grabMallet=ray.intersectObject(mallet,true).length>0;
- }
- root.setPointerCapture(e.pointerId);root.classList.add('dragging');
- if(grabMallet){initAudio().catch(()=>{release();hint.style.opacity='1';hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';});drag=true;lastPoint=point(e);if(lastPoint)grabOffset.set(mallet.position.x-lastPoint.x,mallet.position.z-lastPoint.z);lastTime=performance.now();contact=false;hint.style.opacity='0';}
- else{viewDrag=true;viewPointer=e.pointerId;viewX=e.clientX;viewY=e.clientY;}
+ if(viewDrag||autoHit||e.button!==0||!e.isPrimary)return;
+ root.setPointerCapture(e.pointerId);
+ root.classList.add('dragging');
+ viewDrag=true;
+ viewPointer=e.pointerId;
+ viewX=e.clientX;
+ viewY=e.clientY;
 });
 root.addEventListener('pointermove',e=>{
- if(viewDrag){if(e.pointerId!==viewPointer)return;if(bowlTap&&!bowlTap.moved)return;azimuth-=(e.clientX-viewX)*.006;elevation=THREE.MathUtils.clamp(elevation+(e.clientY-viewY)*.004,.18,1.35);viewX=e.clientX;viewY=e.clientY;updateCamera();return;}
- if(!drag)return;
- const p=point(e);if(!p||!lastPoint)return;
- const now=performance.now(),dt=Math.max(.008,(now-lastTime)/1000);
- const current=new THREE.Vector2(toolTarget.x,toolTarget.z);
- // Preserve the grab offset; project the pointer target onto the collision boundary.
- const target=new THREE.Vector2(p.x+grabOffset.x,p.z+grabOffset.y);
- const delta=target.clone().sub(current),boundary=contactRadius;
- // Swept circle collision catches a quick movement through the rim as well.
- const aa=delta.lengthSq(),bb=2*current.dot(delta),cc=current.lengthSq()-boundary*boundary;
- const disc=bb*bb-4*aa*cc;
- let hit=false;
- if(aa>1e-10&&disc>=0){const t=(-bb-Math.sqrt(disc))/(2*aa);hit=t>=0&&t<=1;}
- hit=hit||target.length()<boundary;
- const normal=(hit?current:target).clone().normalize();
- // Measure actual pointer motion, not the accumulated penetration offset.
- const motion=new THREE.Vector2(p.x-lastPoint.x,p.z-lastPoint.z);
- const inward=Math.max(0,-motion.dot(normal)/dt);
- if(hit){
-   if(!contact&&inward>0){energy=impactEnergy(energy,inward);strike(inward);recoil=Math.min(.025,inward*.007);}
-   // Remove penetration but retain tangential motion along the outside surface.
-   if(target.length()>.35){target.normalize().multiplyScalar(boundary);}
-   else{target.copy(current).normalize().multiplyScalar(boundary);}
- }
- const near=hit||target.length()<boundary+.045;
- tangent=near?Math.min(3,Math.abs(motion.x*normal.y-motion.y*normal.x)/dt):0;
- contact=near;
- if(target.length()>2.8)target.setLength(2.8);
- toolTarget.set(target.x,1.15,target.y);
- lastPoint=p;lastTime=now;lastMove=now;
+ if(!viewDrag||e.pointerId!==viewPointer||(bowlTap&&!bowlTap.moved))return;
+ azimuth-=(e.clientX-viewX)*.006;
+ elevation=THREE.MathUtils.clamp(elevation+(e.clientY-viewY)*.004,.18,1.35);
+ viewX=e.clientX;
+ viewY=e.clientY;
+ updateCamera();
 });
 
-function release(){viewDrag=false;viewPointer=null;drag=false;contact=false;tangent=0;lastPoint=null;root.classList.remove('dragging')}
+function release(){
+ viewDrag=false;
+ viewPointer=null;
+ root.classList.remove('dragging');
+}
 for(const type of ['pointerup','pointercancel','lostpointercapture'])root.addEventListener(type,release);
 function resetRimTurn(){
  rimTurn=null;
@@ -439,7 +413,7 @@ function resetRimTurn(){
  toolTarget.set(restingRadius*malletDirection.x,.86,restingRadius*malletDirection.y);
  mallet.position.copy(toolTarget);
 }
-function stop(){if(rimTurn)resetRimTurn();releaseScreen();cancelRepeat();requestId++;autoPending=false;autoHit=null;energy=0;frictionEnergy=0;if(ctx){loopGain?.gain.setTargetAtTime(0,ctx.currentTime,.03);for(const v of active){v.g.gain.setTargetAtTime(0,ctx.currentTime,.025);v.src.stop(ctx.currentTime+.2)}active.clear()}}
+function stop(){if(rimTurn)resetRimTurn();releaseScreen();cancelRepeat();requestId++;autoPending=false;autoHit=null;energy=0;if(ctx){loopGain?.gain.setTargetAtTime(0,ctx.currentTime,.03);for(const v of active){v.g.gain.setTargetAtTime(0,ctx.currentTime,.025);v.src.stop(ctx.currentTime+.2)}active.clear()}}
 
 function cancelRepeat(){repeating=false;clearTimeout(repeatTimer);repeatTimer=null;document.querySelector('#autoplay').checked=false;}
 function queueAutoplay(){
@@ -458,17 +432,17 @@ function finishHiddenHit(){
  if(!document.hidden||!autoHit)return;
  const {struck,profile}=autoHit;
  autoHit=null;
- if(!struck)strike(profile.speed,profile);
+ if(!struck)strike(profile);
  queueAutoplay();
 }
 async function triggerHit(){
- if(rimTurn||autoHit||autoPending||playMode!=='auto')return;
+ if(rimTurn||autoHit||autoPending)return;
  keepScreenOn();
  repeating=document.querySelector('#autoplay').checked;
  const ticket=requestId;autoPending=true;
  try{
   await initAudio();
-  if(ticket!==requestId||playMode!=='auto')return;
+  if(ticket!==requestId)return;
   release();
   const direction=new THREE.Vector2(mallet.position.x,mallet.position.z).normalize();
   autoHit={start:performance.now(),direction,struck:false,from:Math.hypot(mallet.position.x,mallet.position.z),profile:automaticProfile(mediumStrikeStrength)};
@@ -581,7 +555,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
   const angle=orbitStartAngle+orbitAngle;
   toolTarget.set(radius*Math.cos(angle),.86,radius*Math.sin(angle));
   // Build resonance during the first lap, then sustain it.
-  rimSound=THREE.MathUtils.lerp(.16,.22,Math.min(1,travel));
+  rimSound=THREE.MathUtils.lerp(.26,.32,Math.min(1,travel));
   kitten.position.copy(catHome).applyAxisAngle(orbitAxis,-orbitAngle);
   // Keep the torso aligned with the push while the head turns separately.
   push=rimContact*(.09+.025*Math.sin(orbitAngle*9));
@@ -641,7 +615,7 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
  targetPosition.y=THREE.MathUtils.lerp(.86,orbitMalletHeight,landed);
  if(impactProfile){
   mallet.position.copy(targetPosition);
-  energy=impactEnergy(energy,impactProfile.speed);strike(impactProfile.speed,impactProfile);
+  energy=impactEnergy(energy,impactProfile.speed);strike(impactProfile);
   recoil=.005+.02*impactProfile.gain;
  }else mallet.position.lerp(targetPosition,1-Math.exp(-dt*65));
  const actualRadius=Math.hypot(mallet.position.x,mallet.position.z);
@@ -723,4 +697,11 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
   position.needsUpdate=true;
   geometry.computeVertexNormals();
  }
- energy=stepEnergy(energy,dt,tangent,drag&&contact&&now-lastMove<100);frictionEnergy=stepEnergy(frictionEnergy,dt,tangent,drag&&contact&&now-lastMove<100);if(loopGain)loopGain.gain.setTargetAtTime(rimTurn ? (rimTurn.touchedRim ? rimSound : 0) : (physical||frictionEnergy<.002 ? 0 : frictionEnergy*.32),ctx.currentTime,.12);group.rotation.z=Math.sin(now*.06)*energy*.0015;renderer.render(scene,camera)}requestAnimationFrame(frame);
+ energy=stepEnergy(energy,dt);
+ if(loopGain){
+  loopGain.gain.setTargetAtTime(rimTurn?.touchedRim?rimSound:0,ctx.currentTime,.12);
+ }
+ group.rotation.z=Math.sin(now*.06)*energy*.0015;
+ renderer.render(scene,camera);
+}
+requestAnimationFrame(frame);
