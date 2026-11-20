@@ -247,17 +247,40 @@ function applyTone(){
  for(const voice of active)voice.src.playbackRate?.setTargetAtTime(tone.rate,ctx.currentTime,.08);
 }
 
-const bytes=fetch('./assets/bowl-fsharp2.mp3').then(r=>{if(!r.ok)throw Error('음원 로딩 실패');return r.arrayBuffer()});bytes.catch(()=>hint.textContent='음원을 불러오지 못했습니다. 새로고침해 주세요.');
 let ready;
+function resumeAudio(){
+ if(ctx.state==='running')return Promise.resolve();
+ let timer;
+ const timeout=new Promise((_,reject)=>{
+  timer=setTimeout(()=>reject(Error('Audio output is suspended')),3000);
+ });
+ return Promise.race([ctx.resume(),timeout]).then(()=>{
+  if(ctx.state!=='running')throw Error('Audio output is suspended');
+ }).finally(()=>clearTimeout(timer));
+}
+function recoverPlayback(){
+ if(!ctx||ctx.state==='running'||!(rimTurn||repeating||autoHit||autoPending||active.size))return;
+ resumeAudio().catch(()=>{hint.style.opacity='1';hint.textContent='소리를 다시 들으려면 화면을 한 번 눌러주세요.';});
+}
 function initAudio(){
+ // Request media playback before creating or resuming Web Audio on iOS.
+ try{
+  if(navigator.audioSession && navigator.audioSession.type!=='playback'){
+   navigator.audioSession.type='playback';
+  }
+ }catch{}
  if(!ctx){ctx=new AudioContext();master=ctx.createGain();master.gain.value=muted?0:Number(document.querySelector('#volume').value)/100;const outputBoost=ctx.createGain();outputBoost.gain.value=2.5;const limiter=ctx.createDynamicsCompressor();limiter.threshold.value=-4;limiter.knee.value=2;limiter.ratio.value=12;limiter.attack.value=.003;limiter.release.value=.25;toneFilter=ctx.createBiquadFilter();toneFilter.type='highpass';toneFilter.Q.value=.5;toneFilter.frequency.value=tone.cutoff;bodyFilter=ctx.createBiquadFilter();bodyFilter.type='peaking';bodyFilter.frequency.value=182*tone.rate;bodyFilter.Q.value=.75;bodyFilter.gain.value=0;master.connect(outputBoost);outputBoost.connect(limiter);limiter.connect(ctx.destination);
- ready=bytes.then(b=>ctx.decodeAudioData(b)).then(b=>{buffer=b;
+ }
+ if(!ready)ready=fetch('./assets/bowl-fsharp2.mp3').then(response=>{
+  if(!response.ok)throw Error('음원 로딩 실패');
+  return response.arrayBuffer();
+ }).then(bytes=>ctx.decodeAudioData(bytes)).then(b=>{buffer=b;
  // Loop only the recorded resonance, crossfading the seam; never loop the strike.
  const rate=b.sampleRate,length=Math.floor(rate*4),fade=Math.floor(rate*.4),tail=ctx.createBuffer(b.numberOfChannels,length,rate);
  for(let c=0;c<b.numberOfChannels;c++){const src=b.getChannelData(c),out=tail.getChannelData(c),offset=Math.floor(rate*3);for(let i=0;i<length;i++){let v=src[offset+i];if(i>=length-fade){const t=(i-length+fade)/fade;v=v*(1-t)+src[offset+i-length]*t}out[i]=v}}
  loopSource=ctx.createBufferSource();loopSource.buffer=tail;loopSource.loop=true;loopSource.playbackRate.value=tone.rate;loopSource.loopStart=.4;loopGain=ctx.createGain();loopGain.gain.value=0;loopSource.connect(loopGain);loopGain.connect(master);loopSource.start();
- });ready.catch(()=>hint.textContent='음원을 재생할 수 없습니다. 새로고침해 주세요.');}
- ctx.resume();return ready;
+ }).catch(error=>{ready=null;throw error;});
+ return Promise.all([resumeAudio(),ready]);
 }
 function addCatMark(){
  const container=document.querySelector('#cat-marks');
@@ -319,14 +342,14 @@ root.addEventListener('pointerup',async e=>{
   strike(profile.speed,profile);energy=impactEnergy(energy,profile.speed);
   recoil=.005+.02*profile.gain;
   autoHit={start:performance.now()-1080,direction,struck:true,from:contactRadius,profile};
- }catch(error){releaseScreen();hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';}
+ }catch(error){releaseScreen();hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';}
 },true);
 root.addEventListener('pointerdown',e=>{
  if(rimTurn||drag||viewDrag||autoHit||e.button!==0)return;
  point(e); // Update the picking ray from the pointer position.
  const hit=ray.intersectObject(mallet,true).length>0;
  root.setPointerCapture(e.pointerId);root.classList.add('dragging');
- if(hit&&playMode==='direct'){initAudio();drag=true;lastPoint=point(e);if(lastPoint)grabOffset.set(mallet.position.x-lastPoint.x,mallet.position.z-lastPoint.z);lastTime=performance.now();contact=false;hint.style.opacity='0';}
+ if(hit&&playMode==='direct'){initAudio().catch(()=>{release();hint.style.opacity='1';hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';});drag=true;lastPoint=point(e);if(lastPoint)grabOffset.set(mallet.position.x-lastPoint.x,mallet.position.z-lastPoint.z);lastTime=performance.now();contact=false;hint.style.opacity='0';}
  else{viewDrag=true;viewPointer=e.pointerId;viewX=e.clientX;viewY=e.clientY;}
 });
 root.addEventListener('pointermove',e=>{
@@ -405,7 +428,7 @@ async function triggerHit(){
   const direction=new THREE.Vector2(mallet.position.x,mallet.position.z).normalize();
   autoHit={start:performance.now(),direction,struck:false,from:Math.hypot(mallet.position.x,mallet.position.z),profile:automaticProfile(mediumStrikeStrength)};
   finishHiddenHit();
- }catch(error){releaseScreen();cancelRepeat();hint.style.opacity='1';hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';}
+ }catch(error){releaseScreen();cancelRepeat();hint.style.opacity='1';hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';}
  finally{if(ticket===requestId){autoPending=false;queueAutoplay();}}
 }
 const playButton=document.querySelector('#play-once');
@@ -427,7 +450,7 @@ turnButton.onclick=async()=>{
  }catch{
   if(rimTurn===turn){
    stop();
-   hint.textContent='음원을 불러오지 못했습니다. 다시 눌러주세요.';
+   hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';
   }
  }
 };
@@ -465,7 +488,9 @@ document.querySelector('#volume').addEventListener('input',e=>{
  const value=Number(e.currentTarget.value)/100;
  if(master)master.gain.setTargetAtTime(muted?0:value,ctx.currentTime,.03);
 });
-window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();finishHiddenHit()}});
+document.addEventListener('pointerup',recoverPlayback,true);
+window.addEventListener('pageshow',recoverPlayback);
+window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();finishHiddenHit()}else recoverPlayback()});
 function updateCamera(){
  const baseDistance=innerWidth/innerHeight<1.2?8.3:7.5;
  const mobile=matchMedia('(max-width: 600px), (pointer: coarse) and (max-height: 600px)').matches;
