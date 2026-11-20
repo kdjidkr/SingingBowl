@@ -115,7 +115,7 @@ flightShadow.material=contactShadow.material.clone();
 flightShadow.scale.setScalar(.68);
 scene.add(flightShadow);
 const catLoader=new GLTFLoader();
-Promise.all(['cat-complete-arms','paired-grip'].map(name=>catLoader.loadAsync('./assets/'+name+'.glb'))).then(([gltf,gripModel])=>{
+Promise.all([catLoader.loadAsync('./assets/cat-complete-arms.glb?v=2'),catLoader.loadAsync('./assets/paired-grip.glb')]).then(([gltf,gripModel])=>{
  kitten.add(gltf.scene);
  const findPart=name=>gltf.scene.getObjectByName(name)||
   gltf.scene.children.find(object=>object.name.startsWith(name));
@@ -174,7 +174,9 @@ Promise.all(['cat-complete-arms','paired-grip'].map(name=>catLoader.loadAsync('.
  gltf.scene.traverse(object=>{if(object.isMesh){object.castShadow=true;object.receiveShadow=true;}});
 }).catch(error=>{console.error('고양이 모델을 불러오지 못했습니다.',error)});
 mallet.rotation.z=-Math.PI/12;
-let viewDrag=false,viewPointer=null,viewX=0,viewY=0,azimuth=0,elevation=.665-THREE.MathUtils.degToRad(13);
+let viewDrag=false,viewPointer=null,viewX=0,viewY=0;
+let azimuth=THREE.MathUtils.degToRad(-19);
+let elevation=.665-THREE.MathUtils.degToRad(13);
 // Account for the inward reach of the tilted leather cylinder, not just its origin.
 const bowlOuterRadius=1.25;
 const malletTilt=Math.PI/12;
