@@ -114,6 +114,9 @@ const flightShadow=contactShadow.clone();
 flightShadow.material=contactShadow.material.clone();
 flightShadow.scale.setScalar(.68);
 scene.add(flightShadow);
+const splash=document.querySelector('#loading-splash');
+const splashReady=splash?.querySelector('img').decode()
+ .catch(()=>{}).then(()=>performance.now());
 const catLoader=new GLTFLoader();
 Promise.all([catLoader.loadAsync('./assets/cat-complete-arms.glb?v=2'),catLoader.loadAsync('./assets/paired-grip.glb')]).then(([gltf,gripModel])=>{
  kitten.add(gltf.scene);
@@ -172,7 +175,22 @@ Promise.all([catLoader.loadAsync('./assets/cat-complete-arms.glb?v=2'),catLoader
   grippingArms.push({position,base,geometry,curve,center,tangent,cross,normal,left});
  }
  gltf.scene.traverse(object=>{if(object.isMesh){object.castShadow=true;object.receiveShadow=true;}});
-}).catch(error=>{console.error('고양이 모델을 불러오지 못했습니다.',error)});
+}).catch(error=>{
+ console.error('고양이 모델을 불러오지 못했습니다.',error);
+}).finally(()=>{
+ if(!splashReady)return;
+ splashReady.then(shownAt=>{
+  const remaining=Math.max(0,1300-(performance.now()-shownAt));
+  setTimeout(()=>{
+   const fade=splash.animate([{opacity:1},{opacity:0}],{
+    duration:reduceFlightMotion.matches?0:320,
+    easing:'ease-out',
+    fill:'forwards'
+   });
+   fade.finished.then(()=>splash.remove());
+  },remaining);
+ });
+});
 mallet.rotation.z=-Math.PI/12;
 let viewDrag=false,viewPointer=null,viewX=0,viewY=0;
 let azimuth=THREE.MathUtils.degToRad(-19);

@@ -67,3 +67,24 @@ body{-webkit-user-select:none;user-select:none}
 .play-actions #rim-turn{min-height:48px;background:#f7efdf9c;color:#514431;border:1px solid #ffffff70;font-size:14px}
 .play-actions #rim-turn[aria-pressed=true]{background:#655540;color:#fff9ed}
 .play-actions #play-once:disabled{opacity:.5;cursor:default}
+
+#loading-splash {
+ position: fixed;
+ inset: 0;
+ z-index: 100;
+ display: grid;
+ place-items: center;
+ background: linear-gradient(180deg, #bdb2a0 0%, #d3c8b3 48%, #e3dac4 100%);
+}
+#loading-splash img {
+ display: block;
+ width: min(88vw, 560px);
+ height: auto;
+}
+.loading-label {
+ position: absolute;
+ width: 1px;
+ height: 1px;
+ overflow: hidden;
+ clip-path: inset(50%);
+}
