@@ -276,9 +276,50 @@ function initAudio(){
   return response.arrayBuffer();
  }).then(bytes=>ctx.decodeAudioData(bytes)).then(b=>{buffer=b;
  // Loop only the recorded resonance, crossfading the seam; never loop the strike.
- const rate=b.sampleRate,length=Math.floor(rate*4),fade=Math.floor(rate*.4),tail=ctx.createBuffer(b.numberOfChannels,length,rate);
- for(let c=0;c<b.numberOfChannels;c++){const src=b.getChannelData(c),out=tail.getChannelData(c),offset=Math.floor(rate*3);for(let i=0;i<length;i++){let v=src[offset+i];if(i>=length-fade){const t=(i-length+fade)/fade;v=v*(1-t)+src[offset+i-length]*t}out[i]=v}}
- loopSource=ctx.createBufferSource();loopSource.buffer=tail;loopSource.loop=true;loopSource.playbackRate.value=tone.rate;loopSource.loopStart=.4;loopGain=ctx.createGain();loopGain.gain.value=0;loopSource.connect(loopGain);loopGain.connect(master);loopSource.start();
+ const rate=b.sampleRate;
+ const offset=Math.floor(rate*3);
+ const fade=Math.floor(rate*.75);
+ const reference=b.getChannelData(0);
+ const nominalLength=Math.floor(rate*4);
+ // Choose the overlap with the closest phase near the nominal loop end.
+ let length=nominalLength;
+ let bestMatch=-Infinity;
+ let endGain=1;
+ for(let shift=-Math.floor(rate*.025);shift<=Math.floor(rate*.025);shift++){
+  const candidate=nominalLength+shift;
+  let product=0,startPower=0,endPower=0;
+  for(let i=0;i<fade;i+=64){
+   const start=reference[offset+i];
+   const end=reference[offset+candidate-fade+i];
+   product+=start*end;
+   startPower+=start*start;
+   endPower+=end*end;
+  }
+  const match=product/Math.sqrt(startPower*endPower);
+  if(match>bestMatch){
+   bestMatch=match;
+   length=candidate;
+   // Match the overlap levels without excessively boosting the quieter tail.
+   endGain=THREE.MathUtils.clamp(Math.sqrt(startPower/endPower),.71,1.41);
+  }
+ }
+ const tail=ctx.createBuffer(b.numberOfChannels,length,rate);
+ for(let c=0;c<b.numberOfChannels;c++){
+  const src=b.getChannelData(c),out=tail.getChannelData(c);
+  out.set(src.subarray(offset,offset+length));
+  // Fade the level correction in before the two layers meet.
+  const overlapStart=length-fade;
+  for(let i=fade;i<length;i++){
+   const progress=THREE.MathUtils.smoothstep(i,fade,overlapStart);
+   out[i]*=THREE.MathUtils.lerp(1,endGain,progress);
+  }
+  for(let i=0;i<fade;i++){
+   const index=overlapStart+i;
+   const mix=.5-.5*Math.cos(Math.PI*i/fade);
+   out[index]=out[index]*(1-mix)+src[offset+i]*mix;
+  }
+ }
+ loopSource=ctx.createBufferSource();loopSource.buffer=tail;loopSource.loop=true;loopSource.playbackRate.value=tone.rate;loopSource.loopStart=fade/rate;loopGain=ctx.createGain();loopGain.gain.value=0;loopSource.connect(loopGain);loopGain.connect(master);loopSource.start();
  }).catch(error=>{ready=null;throw error;});
  return Promise.all([resumeAudio(),ready]);
 }
@@ -444,7 +485,7 @@ turnButton.onclick=async()=>{
  stop();
  autoplay.checked=wasChecked;
  release();
- const turn={start:null};
+ const turn={start:null,touchedRim:false};
  rimTurn=turn;
  updatePlayButton();
  keepScreenOn();
@@ -605,6 +646,9 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
  }else mallet.position.lerp(targetPosition,1-Math.exp(-dt*65));
  const actualRadius=Math.hypot(mallet.position.x,mallet.position.z);
  const minRadius=THREE.MathUtils.lerp(contactRadius,orbitRadius,rimContact);
+ if(rimTurn?.start!=null&&rimContact===1&&actualRadius<=orbitRadius+.001){
+  rimTurn.touchedRim=true;
+ }
  if(actualRadius<minRadius){mallet.position.x*=minRadius/actualRadius;mallet.position.z*=minRadius/actualRadius;}
  const angle=Math.atan2(mallet.position.z,mallet.position.x);
  const tilt=THREE.MathUtils.lerp(malletTilt+recoil*2,0,landed);
@@ -679,4 +723,4 @@ let prev=performance.now();function frame(now){requestAnimationFrame(frame);upda
   position.needsUpdate=true;
   geometry.computeVertexNormals();
  }
- energy=stepEnergy(energy,dt,tangent,drag&&contact&&now-lastMove<100);frictionEnergy=stepEnergy(frictionEnergy,dt,tangent,drag&&contact&&now-lastMove<100);if(loopGain)loopGain.gain.setTargetAtTime(rimTurn ? rimSound : (physical||frictionEnergy<.002 ? 0 : frictionEnergy*.32),ctx.currentTime,.12);group.rotation.z=Math.sin(now*.06)*energy*.0015;renderer.render(scene,camera)}requestAnimationFrame(frame);
+ energy=stepEnergy(energy,dt,tangent,drag&&contact&&now-lastMove<100);frictionEnergy=stepEnergy(frictionEnergy,dt,tangent,drag&&contact&&now-lastMove<100);if(loopGain)loopGain.gain.setTargetAtTime(rimTurn ? (rimTurn.touchedRim ? rimSound : 0) : (physical||frictionEnergy<.002 ? 0 : frictionEnergy*.32),ctx.currentTime,.12);group.rotation.z=Math.sin(now*.06)*energy*.0015;renderer.render(scene,camera)}requestAnimationFrame(frame);
