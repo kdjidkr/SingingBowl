@@ -345,11 +345,15 @@ root.addEventListener('pointerup',async e=>{
  }catch(error){releaseScreen();hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';}
 },true);
 root.addEventListener('pointerdown',e=>{
- if(rimTurn||drag||viewDrag||autoHit||e.button!==0)return;
- point(e); // Update the picking ray from the pointer position.
- const hit=ray.intersectObject(mallet,true).length>0;
+ if(drag||viewDrag||autoHit||e.button!==0||!e.isPrimary)return;
+ // During rim playback, every scene drag controls only the camera.
+ let grabMallet=false;
+ if(!rimTurn&&playMode==='direct'){
+  point(e);
+  grabMallet=ray.intersectObject(mallet,true).length>0;
+ }
  root.setPointerCapture(e.pointerId);root.classList.add('dragging');
- if(hit&&playMode==='direct'){initAudio().catch(()=>{release();hint.style.opacity='1';hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';});drag=true;lastPoint=point(e);if(lastPoint)grabOffset.set(mallet.position.x-lastPoint.x,mallet.position.z-lastPoint.z);lastTime=performance.now();contact=false;hint.style.opacity='0';}
+ if(grabMallet){initAudio().catch(()=>{release();hint.style.opacity='1';hint.textContent='재생을 시작하지 못했습니다. 다시 눌러주세요.';});drag=true;lastPoint=point(e);if(lastPoint)grabOffset.set(mallet.position.x-lastPoint.x,mallet.position.z-lastPoint.z);lastTime=performance.now();contact=false;hint.style.opacity='0';}
  else{viewDrag=true;viewPointer=e.pointerId;viewX=e.clientX;viewY=e.clientY;}
 });
 root.addEventListener('pointermove',e=>{
@@ -495,8 +499,11 @@ function updateCamera(){
  const baseDistance=innerWidth/innerHeight<1.2?8.3:7.5;
  const mobile=matchMedia('(max-width: 600px), (pointer: coarse) and (max-height: 600px)').matches;
  // Fit both bowl and mallet by horizontal field of view on narrow screens.
- const horizontalFit=6.6/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
- const distance=mobile?Math.max(baseDistance*1.45/1.2,horizontalFit):Math.max(baseDistance,horizontalFit);
+ const portrait=mobile&&camera.aspect<.8;
+ const sceneWidth=portrait?5.35:6.6;
+ const horizontalFit=sceneWidth/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect);
+ const minimumDistance=mobile?baseDistance*1.45/1.2:baseDistance;
+ const distance=Math.max(minimumDistance,horizontalFit);
  const horizontal=Math.cos(elevation)*distance;
  const targetY=mobile?.25:.5;
  camera.position.set(Math.sin(azimuth)*horizontal,targetY+Math.sin(elevation)*distance,Math.cos(azimuth)*horizontal);
@@ -507,7 +514,7 @@ function updateCamera(){
  camera.updateProjectionMatrix();
  const upper=document.querySelector('.tools').getBoundingClientRect();
  const lower=document.querySelector('#play-once').getBoundingClientRect();
- const centerY=upper.bottom+(lower.top-upper.bottom)*.62;
+ const centerY=upper.bottom+(lower.top-upper.bottom)*(portrait?.54:.62);
  const bowlCenter=new THREE.Vector3(0,.45,0).project(camera);
  const currentY=(1-bowlCenter.y)*innerHeight/2;
  camera.setViewOffset(innerWidth,innerHeight,0,currentY-centerY,innerWidth,innerHeight);
